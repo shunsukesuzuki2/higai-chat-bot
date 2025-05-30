@@ -9,7 +9,7 @@ const config = {
 const app = express();
 const client = new line.Client(config);
 
-// 簡易的な状態保持（本番ではデータベース推奨）
+// 状態記録（簡易） userId → 状態
 const userStates = {};
 
 app.post('/webhook', line.middleware(config), (req, res) => {
@@ -17,7 +17,7 @@ app.post('/webhook', line.middleware(config), (req, res) => {
     .all(req.body.events.map(handleEvent))
     .then((result) => res.json(result))
     .catch((err) => {
-      console.error('Webhookハンドラーでエラー:', err);
+      console.error('Webhookエラー:', err);
       res.status(500).end();
     });
 });
@@ -25,42 +25,46 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 function handleEvent(event) {
   const userId = event.source.userId;
 
-  // 画像を受け取った場合
-  if (event.message?.type === 'image' && userStates[userId] === 'waitingForPhoto') {
-    userStates[userId] = 'photoReceived';
-    return client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: '被害状況のレベルを教えてください（軽微・中程度・重大）'
-    });
-  }
+  if (event.type === 'message') {
+    const msg = event.message;
 
-  // テキストメッセージ処理
-  if (event.type === 'message' && event.message.type === 'text') {
-    const userMessage = event.message.text.trim();
-
-    // 報告開始
-    if (userMessage === '報告') {
+    //  位置情報受信 → 写真要求
+    if (msg.type === 'location' && userStates[userId] === 'waitingForLocation') {
       userStates[userId] = 'waitingForPhoto';
       return client.replyMessage(event.replyToken, {
         type: 'text',
-        text: '写真を共有してください'
+        text: `位置情報を受け取りました（${msg.address}）。次に写真を共有してください。`
       });
     }
 
-    // 被害レベルの入力処理
-    if (userStates[userId] === 'photoReceived') {
-      userStates[userId] = 'done'; // 状態リセット or 保存処理
+    //  写真受信 → 被害レベル要求
+    if (msg.type === 'image' && userStates[userId] === 'waitingForPhoto') {
+      userStates[userId] = 'waitingForSeverity';
       return client.replyMessage(event.replyToken, {
         type: 'text',
-        text: `ありがとうございます。「${userMessage}」として報告を記録しました。`
+        text: '被害状況のレベルを教えてください（軽微・中程度・重大）'
       });
     }
 
-    // それ以外のテキストは無視
-    return Promise.resolve(null);
+    //  被害レベル受信 → 完了
+    if (msg.type === 'text' && userStates[userId] === 'waitingForSeverity') {
+      userStates[userId] = 'done';
+      return client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: `ありがとうございます。「${msg.text}」として記録しました。ご協力ありがとうございました！`
+      });
+    }
+
+    // 「報告」開始 → 位置情報要求
+    if (msg.type === 'text' && msg.text.trim() === '報告') {
+      userStates[userId] = 'waitingForLocation';
+      return client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '被害の位置情報を送ってください'
+      });
+    }
   }
 
-  // 該当しないイベントは無視
   return Promise.resolve(null);
 }
 
@@ -68,3 +72,4 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`🚀 LINE Bot is running on port ${port}`);
 });
+
