@@ -48,7 +48,7 @@ async function uploadImageFromLine(messageId, userId) {
       Key: key,
       Body: buffer,
       ContentType: 'image/jpeg',
-      ACL: 'public-read' // バケットが公開設定の場合のみ
+      //ACL: 'public-read' // バケットが公開設定の場合のみ
     }).promise();
 
     return result.Location; // URLを返す
