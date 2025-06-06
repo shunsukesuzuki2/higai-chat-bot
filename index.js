@@ -3,6 +3,15 @@ const db = new sqlite3.Database('./reports.db');
 const express = require('express');
 const line = require('@line/bot-sdk');
 
+const AWS = require('aws-sdk');
+const axios = require('axios');
+const s3 = new AWS.S3({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION
+});
+
+
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET
@@ -21,6 +30,33 @@ app.post('/webhook', line.middleware(config), (req, res) => {
       res.status(500).end();
     });
 });
+
+async function uploadImageFromLine(messageId, userId) {
+  try {
+    const imageStream = await client.getMessageContent(messageId);
+
+    const chunks = [];
+    for await (const chunk of imageStream) {
+      chunks.push(chunk);
+    }
+
+    const buffer = Buffer.concat(chunks);
+    const key = `${userId}_${messageId}.jpg`;
+
+    const result = await s3.upload({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: key,
+      Body: buffer,
+      ContentType: 'image/jpeg',
+      ACL: 'public-read' // バケットが公開設定の場合のみ
+    }).promise();
+
+    return result.Location; // URLを返す
+  } catch (error) {
+    console.error('❌ 画像アップロード失敗:', error);
+    throw error;
+  }
+}
 
 function handleEvent(event) {
   const userId = event.source.userId;
@@ -64,76 +100,66 @@ function handleEvent(event) {
     }
 
     // 件数 or all を受け取って一覧表示
-if (msg.type === 'text' && userStates[userId] === 'waitingForListCount') 
-  {
-    const input = msg.text.trim().toLowerCase();
-    let limitQuery = '';
-    let responsePrefix = '';
+if (msg.type === 'text' && userStates[userId] === 'waitingForListCount') {
+  const input = msg.text.trim().toLowerCase();
+  let limitQuery = '';
+  let responsePrefix = '';
 
-    if (input === 'all') 
-    {
-      limitQuery = ''; // no LIMIT
-      responsePrefix = '📋 被害報告一覧（全件）\n\n';
-    } 
-    else if (/^\d+$/.test(input))
-    {
-      limitQuery = `LIMIT ${parseInt(input, 10)}`;
-      responsePrefix = `📋 被害報告一覧（最新${input}件）\n\n`;
-    } 
-    else 
-    {
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '数字または「all」と入力してください。'
-      });
-    }
-
-    userStates[userId] = 'done'; // 状態リセット
-
-    return new Promise((resolve) => 
-    {
-      db.all
-      (
-        `SELECT address, latitude, longitude, severity, userId FROM damagereport ORDER BY id DESC ${limitQuery}`,
-        [],
-        (err, rows) => 
-        {
-          if (err) 
-          {
-            console.error('❌ 一覧取得エラー:', err.message);
-            return client.replyMessage(event.replyToken, {
-              type: 'text',
-              text: '一覧の取得中にエラーが発生しました。'
-            }).then(resolve);
-          }
-
-          if (rows.length === 0) {
-            return client.replyMessage(event.replyToken, {
-              type: 'text',
-              text: '被害報告はまだ登録されていません。'
-            }).then(resolve);
-          }
-
-          const messageText = rows.map((r, i) => {
-            return `📍報告${i + 1}\n住所: ${r.address || '不明'}\n緯度: ${r.latitude}\n経度: ${r.longitude}\n被害: ${r.severity}\nユーザー: ${r.userId}`;
-          }).join('\n\n');
-
-          return client.replyMessage(event.replyToken, {
-            type: 'text',
-            text: `${responsePrefix}${messageText}`
-          }).then(resolve);
-        }
-      );
+  if (input === 'all') {
+    limitQuery = ''; // no LIMIT
+    responsePrefix = '📋 被害報告一覧（全件）\n\n';
+  } else if (/^\d+$/.test(input)) {
+    limitQuery = `LIMIT ${parseInt(input, 10)}`;
+    responsePrefix = `📋 被害報告一覧（最新${input}件）\n\n`;
+  } else {
+    return client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '数字または「all」と入力してください。'
     });
   }
 
+  userStates[userId] = 'done'; // 状態リセット
 
+  return new Promise((resolve) => {
+    db.all(
+      `SELECT address, latitude, longitude, severity, userId, imageUrl FROM damagereport ORDER BY id DESC ${limitQuery}`,
+      [],
+      (err, rows) => {
+        if (err) {
+          console.error('❌ 一覧取得エラー:', err.message);
+          return client.replyMessage(event.replyToken, {
+            type: 'text',
+            text: '一覧の取得中にエラーが発生しました。'
+          }).then(resolve);
+        }
 
+        if (rows.length === 0) {
+          return client.replyMessage(event.replyToken, {
+            type: 'text',
+            text: '被害報告はまだ登録されていません。'
+          }).then(resolve);
+        }
 
-  
+        const messageText = rows.map((r, i) => {
+          return `📍報告${i + 1}
+住所: ${r.address || '不明'}
+緯度: ${r.latitude}
+経度: ${r.longitude}
+被害: ${r.severity}
+ユーザー: ${r.userId}
+画像URL: ${r.imageUrl || '未登録'}`;
+        }).join('\n\n');
+
+        return client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: `${responsePrefix}${messageText}`
+        }).then(resolve);
+      }
+    );
+  });
+}
 
     
-
     // 位置情報受信 → DBに更新 & 写真要求
     if (msg.type === 'location' && userStates[userId] === 'waitingForLocation') {
       userStates[userId] = 'waitingForPhoto';
@@ -157,24 +183,31 @@ if (msg.type === 'text' && userStates[userId] === 'waitingForListCount')
 
     // 写真受信 → DBに更新（画像URL仮保存） & 被害レベル要求
     if (msg.type === 'image' && userStates[userId] === 'waitingForPhoto') {
-      userStates[userId] = 'waitingForSeverity';
+  userStates[userId] = 'waitingForSeverity';
+  uploadImageFromLine(msg.id, userId)
+    .then((imageUrl) => {
       db.run(
         `UPDATE damagereport SET imageUrl = ? WHERE userId = ? AND imageUrl IS NULL`,
-        [msg.id, userId], // 後で画像URL変換可
-        function (err) {
+        [imageUrl, userId],
+        (err) => {
           if (err) {
-            console.error('❌ 画像保存エラー:', err.message);
+            console.error('❌ SQLiteへの画像URL保存エラー:', err.message);
           } else {
-            console.log(`✅ 画像IDを保存（userId: ${userId}）`);
+            console.log(`✅ 画像URLを保存: ${imageUrl}`);
           }
         }
       );
+    })
+    .catch((err) => {
+      console.error('❌ S3アップロード処理中のエラー:', err);
+    });
 
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '被害状況のレベルを教えてください（軽微・中程度・重大）'
-      });
-    }
+  return client.replyMessage(event.replyToken, {
+    type: 'text',
+    text: '被害状況のレベルを教えてください（軽微・中程度・重大）'
+  });
+}
+
 
     // 被害レベル受信 → DBに保存 → 完了
     if (msg.type === 'text' && userStates[userId] === 'waitingForSeverity') {
