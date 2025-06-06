@@ -60,6 +60,30 @@ async function uploadImageFromLine(messageId, userId) {
 
 function handleEvent(event) {
   const userId = event.source.userId;
+  if (event.type === 'follow')
+{
+  return client.replyMessage(event.replyToken, {
+    type: 'template',
+    altText: '操作を選択してください',
+    template: {
+      type: 'buttons',
+      title: 'ようこそ！',
+      text: '操作を選んでください。',
+      actions: [
+        {
+          type: 'message',
+          label: '報告',
+          text: '報告'
+        },
+        {
+          type: 'message',
+          label: '一覧',
+          text: '一覧'
+        }
+      ]
+    }
+  });
+}
 
   if (event.type === 'message') 
   {
