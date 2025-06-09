@@ -58,17 +58,14 @@ async function uploadImageFromLine(messageId, userId) {
   }
 }
 
-function handleEvent(event) {
-  const userId = event.source.userId;
-  if (event.type === 'follow')
-{
-  return client.replyMessage(event.replyToken, {
+function getMenuButtons() {
+  return {
     type: 'template',
     altText: '操作を選択してください',
     template: {
       type: 'buttons',
-      title: 'ようこそ！',
-      text: '操作を選んでください。',
+      title: '次の操作を選んでください',
+      text: '以下から操作を選択できます',
       actions: [
         {
           type: 'message',
@@ -82,8 +79,16 @@ function handleEvent(event) {
         }
       ]
     }
-  });
+  };
 }
+
+
+function handleEvent(event) {
+  const userId = event.source.userId;
+ if (event.type === 'follow') {
+  return client.replyMessage(event.replyToken, getMenuButtons());
+}
+
 
   if (event.type === 'message') 
   {
@@ -124,63 +129,78 @@ function handleEvent(event) {
     }
 
     // 件数 or all を受け取って一覧表示
-if (msg.type === 'text' && userStates[userId] === 'waitingForListCount') {
-  const input = msg.text.trim().toLowerCase();
-  let limitQuery = '';
-  let responsePrefix = '';
+if (msg.type === 'text' && userStates[userId] === 'waitingForListCount') 
+  {
+    const input = msg.text.trim().toLowerCase();
+    let limitQuery = '';
+    let responsePrefix = '';
 
-  if (input === 'all') {
+  if (input === 'all')
+       {
     limitQuery = ''; // no LIMIT
     responsePrefix = '📋 被害報告一覧（全件）\n\n';
-  } else if (/^\d+$/.test(input)) {
-    limitQuery = `LIMIT ${parseInt(input, 10)}`;
-    responsePrefix = `📋 被害報告一覧（最新${input}件）\n\n`;
-  } else {
+        } 
+  else if (/^\d+$/.test(input)) 
+        {
+      limitQuery = `LIMIT ${parseInt(input, 10)}`;
+      responsePrefix = `📋 被害報告一覧（最新${input}件）\n\n`;
+        }
+  else {
     return client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: '数字または「all」と入力してください。'
+    type: 'text',
+    text: '数字または「all」と入力してください。'
     });
   }
 
   userStates[userId] = 'done'; // 状態リセット
 
-  return new Promise((resolve) => {
-    db.all(
-      `SELECT address, latitude, longitude, severity, userId, imageUrl FROM damagereport ORDER BY id DESC ${limitQuery}`,
-      [],
-      (err, rows) => {
-        if (err) {
-          console.error('❌ 一覧取得エラー:', err.message);
-          return client.replyMessage(event.replyToken, {
+return new Promise((resolve) => {
+  db.all(
+    `SELECT address, latitude, longitude, severity, userId, imageUrl FROM damagereport ORDER BY id DESC ${limitQuery}`,
+    [],
+    (err, rows) => {
+      if (err) {
+        console.error('❌ 一覧取得エラー:', err.message);
+        return client.replyMessage(event.replyToken, [
+          {
             type: 'text',
             text: '一覧の取得中にエラーが発生しました。'
-          }).then(resolve);
-        }
+          },
+          getMenuButtons()
+        ]).then(resolve);
+      }
 
-        if (rows.length === 0) {
-          return client.replyMessage(event.replyToken, {
+      if (rows.length === 0) {
+        return client.replyMessage(event.replyToken, [
+          {
             type: 'text',
             text: '被害報告はまだ登録されていません。'
-          }).then(resolve);
-        }
+          },
+          getMenuButtons()
+        ]).then(resolve);
+      }
 
-        const messageText = rows.map((r, i) => {
-          return `📍報告${i + 1}
+      const messageText = rows.map((r, i) => {
+        return `📍報告${i + 1}
 住所: ${r.address || '不明'}
 緯度: ${r.latitude}
 経度: ${r.longitude}
 被害: ${r.severity}
 ユーザー: ${r.userId}
 画像URL: ${r.imageUrl || '未登録'}`;
-        }).join('\n\n');
+      }).join('\n\n');
 
-        return client.replyMessage(event.replyToken, {
+      return client.replyMessage(event.replyToken, [
+        {
           type: 'text',
           text: `${responsePrefix}${messageText}`
-        }).then(resolve);
-      }
-    );
-  });
+        },
+        getMenuButtons()
+      ]).then(resolve);
+    }
+  );
+});
+
 }
 
     
@@ -249,10 +269,14 @@ if (msg.type === 'text' && userStates[userId] === 'waitingForListCount') {
         }
       );
 
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: `ありがとうございます。「${msg.text}」として記録しました。ご協力ありがとうございました！`
-      });
+        return client.replyMessage(event.replyToken, [
+          {
+            type: 'text',
+            text: `ありがとうございます。「${msg.text}」として記録しました。ご協力ありがとうございました！`
+          },
+          getMenuButtons()
+        ]);
+
     }
   }
 
