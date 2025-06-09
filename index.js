@@ -205,7 +205,8 @@ return new Promise((resolve) => {
 
     
     // 位置情報受信 → DBに更新 & 写真要求
-    if (msg.type === 'location' && userStates[userId] === 'waitingForLocation') {
+    if (msg.type === 'location' && userStates[userId] === 'waitingForLocation') 
+    {
       userStates[userId] = 'waitingForPhoto';
       db.run(
         `UPDATE damagereport SET address = ?, latitude = ?, longitude = ? WHERE userId = ? AND address IS NULL`,
@@ -226,9 +227,10 @@ return new Promise((resolve) => {
     }
 
     // 写真受信 → DBに更新（画像URL仮保存） & 被害レベル要求
-    if (msg.type === 'image' && userStates[userId] === 'waitingForPhoto') {
-  userStates[userId] = 'waitingForSeverity';
-  uploadImageFromLine(msg.id, userId)
+    if (msg.type === 'image' && userStates[userId] === 'waitingForPhoto') 
+      {
+        userStates[userId] = 'waitingForSeverity';
+        uploadImageFromLine(msg.id, userId)
     .then((imageUrl) => {
       db.run(
         `UPDATE damagereport SET imageUrl = ? WHERE userId = ? AND imageUrl IS NULL`,
@@ -246,10 +248,39 @@ return new Promise((resolve) => {
       console.error('❌ S3アップロード処理中のエラー:', err);
     });
 
-  return client.replyMessage(event.replyToken, {
-    type: 'text',
-    text: '被害状況のレベルを教えてください（軽微・中程度・重大）'
-  });
+return client.replyMessage(event.replyToken, {
+  type: 'text',
+  text: '被害状況のレベルを選択してください',
+  quickReply: {
+    items: [
+      {
+        type: 'action',
+        action: {
+          type: 'message',
+          label: '軽微',
+          text: '軽微'
+        }
+      },
+      {
+        type: 'action',
+        action: {
+          type: 'message',
+          label: '中程度',
+          text: '中程度'
+        }
+      },
+      {
+        type: 'action',
+        action: {
+          type: 'message',
+          label: '重大',
+          text: '重大'
+        }
+      }
+    ]
+  }
+});
+
 }
 
 
