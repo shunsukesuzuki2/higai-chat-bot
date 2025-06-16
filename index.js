@@ -11,6 +11,9 @@ const config = {
 
 const app = express();
 const client = new line.Client(config);
+// プール生成前に
+console.log('ℹ️ DATABASE_URL =', process.env.DATABASE_URL);
+console.log('ℹ️ PGHOST       =', process.env.PGHOST);
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
