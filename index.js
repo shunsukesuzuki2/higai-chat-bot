@@ -11,7 +11,16 @@ const config = {
 
 const app = express();
 const client = new line.Client(config);
-const pool = new Pool(); // Railway環境変数から自動接続
+
+const { Pool } = require('pg');
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false   // Railway のマネージドPostgresでは必要な場合があります
+  }
+});
+
 const userStates = {};
 
 const s3 = new AWS.S3({
