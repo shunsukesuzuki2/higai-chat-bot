@@ -12,8 +12,6 @@ const config = {
 const app = express();
 const client = new line.Client(config);
 
-const { Pool } = require('pg');
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
