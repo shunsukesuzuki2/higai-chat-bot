@@ -20,6 +20,18 @@ const pool = new Pool({
 });
 
 const userStates = {};
+app.use((err, req, res, next) => {
+  if (err && err.status === 401) {
+    console.error('❌ Signature Validation Failed:', err.message);
+    return res.status(401).end();
+  }
+  next(err);
+});
+
+app.get('/webhook', (req, res) => {
+  console.log('🥞 GET /webhook ping received');
+  res.status(200).send('OK');
+});
 
 const s3 = new AWS.S3({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -60,16 +72,29 @@ async function uploadImageFromLine(messageId, userId) {
   return result.Location;
 }
 
-app.post('/webhook', line.middleware(config), (req, res) => {
-  Promise.all(req.body.events.map(handleEvent))
-    .then((result) => res.json(result))
-    .catch((err) => {
-      console.error('Webhookエラー:', err);
-      res.status(500).end();
-    });
-});
+app.post(
+  '/webhook',
+  line.middleware(config),
+  async (req, res) => {
+    // デバッグ：リクエスト受信ログ
+    console.log('📥 Received POST /webhook', JSON.stringify(req.body, null, 2));
+
+    try {
+      const results = await Promise.all(
+        req.body.events.map(handleEvent)
+      );
+      console.log('🎉 All events handled:', results);
+      return res.json(results);
+    } catch (err) {
+      console.error('🔥 Processing error:', err);
+      return res.status(500).end();
+    }
+  }
+);
+
 
 async function handleEvent(event) {
+  console.log('🔍 handleEvent:', JSON.stringify(event, null, 2));
   const userId = event.source.userId;
 
   if (event.type === 'follow') {
