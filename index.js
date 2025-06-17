@@ -11,9 +11,7 @@ const config = {
 
 const app = express();
 const client = new line.Client(config);
-// プール生成前に
-console.log('ℹ️ DATABASE_URL =', process.env.DATABASE_URL);
-console.log('ℹ️ PGHOST       =', process.env.PGHOST);
+
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -21,18 +19,8 @@ const pool = new Pool({
 });
 
 const userStates = {};
-app.use((err, req, res, next) => {
-  if (err && err.status === 401) {
-    console.error('❌ Signature Validation Failed:', err.message);
-    return res.status(401).end();
-  }
-  next(err);
-});
 
-app.get('/webhook', (req, res) => {
-  console.log('🥞 GET /webhook ping received');
-  res.status(200).send('OK');
-});
+
 
 const s3 = new AWS.S3({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -95,7 +83,6 @@ app.post(
 
 
 async function handleEvent(event) {
-  console.log('🔍 handleEvent:', JSON.stringify(event, null, 2));
   const userId = event.source.userId;
 
   if (event.type === 'follow') {
