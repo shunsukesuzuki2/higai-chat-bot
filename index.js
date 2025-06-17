@@ -16,11 +16,14 @@ console.log('ℹ️ DATABASE_URL =', process.env.DATABASE_URL);
 console.log('ℹ️ PGHOST       =', process.env.PGHOST);
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false   // Railway のマネージドPostgresでは必要な場合があります
-  }
+  host:     process.env.PGHOST,
+  port:     Number(process.env.PGPORT),
+  user:     process.env.PGUSER,
+  password: process.env.PGPASSWORD,
+  database: process.env.PGDATABASE,
+  ssl:      { rejectUnauthorized: false }
 });
+
 
 const userStates = {};
 app.use((err, req, res, next) => {
