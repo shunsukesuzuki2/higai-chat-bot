@@ -95,7 +95,7 @@ app.post(
 
 
 async function handleEvent(event) {
-  const userid = event.source.userid;
+  const userid = event.source.userId;
 
   if (event.type === 'follow') {
     return client.replyMessage(event.replyToken, getMenuButtons());
@@ -244,11 +244,11 @@ async function handleEvent(event) {
 
       // 5) 管理者へのプッシュ通知
       if (admins.length > 0) {
-        const pushText = `📢 新しい被害報告が届きました
+        const pushText = ` 新しい被害報告が届きました
         ・ユーザーID: ${userid}
         ・レベル: ${msg.text}`;
         try {
-          await client.pushMessage(admins, { type: 'text', text: pushText });
+          await client.multicast(adminIds, { type:'text', text: pushText });
           console.log('✅ 管理者に通知を送信:', admins);
         } catch (err) {
           console.error('❌ 管理者への通知エラー:', err);
