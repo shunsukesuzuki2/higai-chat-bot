@@ -2,7 +2,6 @@ const express = require('express');
 const line = require('@line/bot-sdk');
 const { Pool } = require('pg');
 const AWS = require('aws-sdk');
-const axios = require('axios');
 
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
@@ -71,6 +70,36 @@ async function getAdminUserIds() {
     return [];
   }
 }
+
+//報告と被害写真を1配列にまとめる関数
+function buildReportMessages(r, idx) {
+  const textMsg = {
+    type: 'text',
+    text:
+      `📍報告${idx + 1}\n` +
+      `住所: ${r.address ?? '不明'}\n` +
+      `緯度: ${r.latitude}, 経度: ${r.longitude}\n` +
+      `被害: ${r.severity}`
+  };
+
+  const imageMsg = {
+    type: 'image',
+    originalContentUrl: r.imageurl,
+    previewImageUrl: r.imageurl
+  };
+
+  return [textMsg, imageMsg];
+}
+
+// size件ごとにレポートメッセージをまとめる関数
+function chunkMessages(arr, size) {
+  const result = [];
+  for (let i = 0; i < arr.length; i += size) {
+    result.push(arr.slice(i, i + size));
+  }
+  return result;
+}
+
 
 
 app.post(
@@ -151,21 +180,28 @@ async function handleEvent(event) {
             getMenuButtons()
           ]);
         }
+        // ① 配列化（buildReportMessages にレコードと index を渡す）
+        const allMsgs = result.rows.flatMap((r, idx) => buildReportMessages(r, idx));
 
-        const messageText = result.rows.map((r, i) => {
-          return `📍報告${i + 1}
-住所: ${r.address || '不明'}
-緯度: ${r.latitude}
-経度: ${r.longitude}
-被害: ${r.severity}
-ユーザー: ${r.userid}
-画像URL: ${r.imageurl || '未登録'}`;
-        }).join('\n\n');
+        // ② チャンク化（5 件ずつ）
+        const chunks = chunkMessages(allMsgs, 5);
 
-        return client.replyMessage(event.replyToken, [
-          { type: 'text', text: `${responsePrefix}${messageText}` },
-          getMenuButtons()
-        ]);
+        // ヘッダーを先頭に追加
+        const headerMsg = { type: 'text', text: responsePrefix };
+        chunks[0].unshift(headerMsg);
+
+        // ③ 送信
+        //最初のチャンクを返す
+        await client.replyMessage(event.replyToken, chunks[0]);
+
+        // 残りのチャンクは pushMessage で順次送信
+        for (let i = 1; i < chunks.length; i++) {
+          await client.pushMessage(userid, chunks[i]);
+        }
+
+        // メニューを表示
+        await client.pushMessage(userid, getMenuButtons());
+        return;
       } catch (err) {
         console.error('❌ 一覧取得エラー:', err.message);
         return client.replyMessage(event.replyToken, [
@@ -248,12 +284,12 @@ async function handleEvent(event) {
         ・ユーザーID: ${userid}
         ・レベル: ${msg.text}`;
         try {
-            if (admins.length === 1) {
-              await client.pushMessage(admins[0], { type: 'text', text: pushText });
-            } 
-            else {
-              await client.multicast(admins, { type: 'text', text: pushText });
-            }
+          if (admins.length === 1) {
+            await client.pushMessage(admins[0], { type: 'text', text: pushText });
+          }
+          else {
+            await client.multicast(admins, { type: 'text', text: pushText });
+          }
           console.log('✅ 管理者に通知を送信:', admins);
         } catch (err) {
           console.error('❌ 管理者への通知エラー:', err);
