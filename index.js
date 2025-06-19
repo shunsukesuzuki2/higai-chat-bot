@@ -44,14 +44,14 @@ function getMenuButtons() {
   };
 }
 
-async function uploadImageFromLine(messageId, userId) {
+async function uploadImageFromLine(messageId, userid) {
   const imageStream = await client.getMessageContent(messageId);
   const chunks = [];
   for await (const chunk of imageStream) {
     chunks.push(chunk);
   }
   const buffer = Buffer.concat(chunks);
-  const key = `${userId}_${messageId}.jpg`;
+  const key = `${userid}_${messageId}.jpg`;
   const result = await s3.upload({
     Bucket: process.env.S3_BUCKET_NAME,
     Key: key,
@@ -83,7 +83,7 @@ app.post(
 
 
 async function handleEvent(event) {
-  const userId = event.source.userId;
+  const userid = event.source.userid;
 
   if (event.type === 'follow') {
     return client.replyMessage(event.replyToken, getMenuButtons());
@@ -93,8 +93,8 @@ async function handleEvent(event) {
     const msg = event.message;
 
     if (msg.type === 'text' && msg.text.trim() === '報告') {
-      userStates[userId] = 'waitingForLocation';
-      await pool.query(`INSERT INTO damagereport (userId) VALUES ($1)`, [userId]);
+      userStates[userid] = 'waitingForLocation';
+      await pool.query(`INSERT INTO damagereport (userid) VALUES ($1)`, [userid]);
       return client.replyMessage(event.replyToken, {
         type: 'text',
         text: '被害の位置情報を送ってください'
@@ -102,14 +102,14 @@ async function handleEvent(event) {
     }
 
     if (msg.type === 'text' && msg.text.trim() === '一覧') {
-      userStates[userId] = 'waitingForListCount';
+      userStates[userid] = 'waitingForListCount';
       return client.replyMessage(event.replyToken, {
         type: 'text',
         text: '何件表示しますか？数字を入力するか、全件表示する場合は「all」と入力してください。'
       });
     }
 
-    if (msg.type === 'text' && userStates[userId] === 'waitingForListCount') {
+    if (msg.type === 'text' && userStates[userid] === 'waitingForListCount') {
       const input = msg.text.trim().toLowerCase();
       let limitClause = '';
       let responsePrefix = '';
@@ -126,11 +126,11 @@ async function handleEvent(event) {
         });
       }
 
-      userStates[userId] = 'done';
+      userStates[userid] = 'done';
 
       try {
         const result = await pool.query(
-          `SELECT address, latitude, longitude, severity, userId, imageUrl FROM damagereport ORDER BY id DESC ${limitClause}`
+          `SELECT address, latitude, longitude, severity, userid, imageurl FROM damagereport ORDER BY id DESC ${limitClause}`
         );
 
         if (result.rows.length === 0) {
@@ -146,8 +146,8 @@ async function handleEvent(event) {
 緯度: ${r.latitude}
 経度: ${r.longitude}
 被害: ${r.severity}
-ユーザー: ${r.userId}
-画像URL: ${r.imageUrl || '未登録'}`;
+ユーザー: ${r.userid}
+画像URL: ${r.imageurl || '未登録'}`;
         }).join('\n\n');
 
         return client.replyMessage(event.replyToken, [
@@ -163,11 +163,11 @@ async function handleEvent(event) {
       }
     }
 
-    if (msg.type === 'location' && userStates[userId] === 'waitingForLocation') {
-      userStates[userId] = 'waitingForPhoto';
+    if (msg.type === 'location' && userStates[userid] === 'waitingForLocation') {
+      userStates[userid] = 'waitingForPhoto';
       await pool.query(
-        `UPDATE damagereport SET address = $1, latitude = $2, longitude = $3 WHERE userId = $4 AND address IS NULL`,
-        [msg.address, msg.latitude, msg.longitude, userId]
+        `UPDATE damagereport SET address = $1, latitude = $2, longitude = $3 WHERE userid = $4 AND address IS NULL`,
+        [msg.address, msg.latitude, msg.longitude, userid]
       );
       return client.replyMessage(event.replyToken, {
         type: 'text',
@@ -175,14 +175,14 @@ async function handleEvent(event) {
       });
     }
 
-    if (msg.type === 'image' && userStates[userId] === 'waitingForPhoto') {
-      userStates[userId] = 'waitingForSeverity';
+    if (msg.type === 'image' && userStates[userid] === 'waitingForPhoto') {
+      userStates[userid] = 'waitingForSeverity';
 
       try {
-        const imageUrl = await uploadImageFromLine(msg.id, userId);
+        const imageurl = await uploadImageFromLine(msg.id, userid);
         await pool.query(
-          `UPDATE damagereport SET imageUrl = $1 WHERE userId = $2 AND imageUrl IS NULL`,
-          [imageUrl, userId]
+          `UPDATE damagereport SET imageurl = $1 WHERE userid = $2 AND imageurl IS NULL`,
+          [imageurl, userid]
         );
       } catch (err) {
         console.error('❌ S3アップロード処理中のエラー:', err);
@@ -201,11 +201,11 @@ async function handleEvent(event) {
       });
     }
 
-    if (msg.type === 'text' && userStates[userId] === 'waitingForSeverity') {
-      userStates[userId] = 'done';
+    if (msg.type === 'text' && userStates[userid] === 'waitingForSeverity') {
+      userStates[userid] = 'done';
       await pool.query(
-        `UPDATE damagereport SET severity = $1 WHERE userId = $2 AND severity IS NULL`,
-        [msg.text, userId]
+        `UPDATE damagereport SET severity = $1 WHERE userid = $2 AND severity IS NULL`,
+        [msg.text, userid]
       );
       return client.replyMessage(event.replyToken, [
         { type: 'text', text: `ありがとうございます。「${msg.text}」として記録しました。ご協力ありがとうございました！` },
