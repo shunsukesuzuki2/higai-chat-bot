@@ -175,7 +175,7 @@ async function handleEvent(event) {
         const allMsgs = result.rows.flatMap((r, idx) => buildReportMessages(r, idx));
         // ヘッダーを追加
         const headerMsg = { type: 'text', text: responsePrefix };
-        allMsgs[0].unshift(headerMsg);
+        allMsgs.unshift(headerMsg);
 
         // チャンク化（5 件ずつ）
         const chunks = chunkMessages(allMsgs, 5);
