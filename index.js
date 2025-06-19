@@ -37,7 +37,7 @@ function getMenuButtons() {
       text: '以下から操作を選択できます',
       actions: [
         { type: 'message', label: '報告', text: '報告' },
-        { type: 'message', label: '一覧', text: '一覧' }
+        { type: 'message', label: '被害地一覧', text: '被害地一覧' }
       ]
     }
   };
@@ -72,13 +72,16 @@ async function getAdminUserIds() {
   }
 }
 
-//報告と被害写真を1配列にまとめる関数
+//1報告の報告とその被害写真を1配列にまとめる関数
 function buildReportMessages(r, idx) {
+  const address = r.address;
+  const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
   const textMsg = {
     type: 'text',
     text:
       `📍報告${idx + 1}\n` +
       `住所: ${r.address ?? '不明'}\n` +
+      `google map: ${mapUrl ?? '不明'}\n` +
       `緯度: ${r.latitude}, 経度: ${r.longitude}\n` +
       `被害: ${r.severity}`
   };
@@ -132,8 +135,8 @@ async function handleEvent(event) {
 
   if (event.type === 'message') {
     const msg = event.message;
-    // 一覧機能
-    if (msg.type === 'text' && msg.text.trim() === '一覧') {
+    // 被害地一覧機能
+    if (msg.type === 'text' && msg.text.trim() === '被害地一覧') {
       userStates[userid] = 'waitingForListCount';
       return client.replyMessage(event.replyToken, {
         type: 'text',
@@ -147,10 +150,10 @@ async function handleEvent(event) {
       let responsePrefix = '';
 
       if (input === 'all') {
-        responsePrefix = '📋 被害報告一覧（全件）\n';
+        responsePrefix = '📋 被害地一覧（全件）\n';
       } else if (/^\d+$/.test(input)) {
         limitClause = `LIMIT ${parseInt(input, 10)}`;
-        responsePrefix = `📋 被害報告一覧（最新${input}件）\n`;
+        responsePrefix = `📋 被害地一覧（最新${input}件）\n`;
       } else {
         return client.replyMessage(event.replyToken, {
           type: 'text',
@@ -171,7 +174,7 @@ async function handleEvent(event) {
             getMenuButtons()
           ]);
         }
-        // 配列化（buildReportMessages にレコードと index を渡す）
+        // 配列化（buildReportMessages にDBのと index を渡す）
         const allMsgs = result.rows.flatMap((r, idx) => buildReportMessages(r, idx));
         // ヘッダーを追加
         const headerMsg = { type: 'text', text: responsePrefix };
@@ -255,9 +258,9 @@ async function handleEvent(event) {
       // 2) DB 更新
       await pool.query(
         `UPDATE damagereport 
-       SET severity = $1 
-     WHERE userid = $2 
-       AND severity IS NULL`,
+        SET severity = $1 
+        WHERE userid = $2 
+        AND severity IS NULL`,
         [msg.text, userid]
       );
 
