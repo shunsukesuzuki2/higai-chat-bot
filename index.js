@@ -213,11 +213,11 @@ async function handleEvent(event) {
       });
     }
 
-    if (msg.type === 'text' && userStates[userId] === 'waitingForSeverity') {
-      console.log('✅ entering severity branch for', userId);
+    if (msg.type === 'text' && userStates[userid] === 'waitingForSeverity') {
+      console.log('✅ entering severity branch for', userid);
 
       // 1) 状態更新
-      userStates[userId] = 'done';
+      userStates[userid] = 'done';
 
       // 2) DB 更新
       await pool.query(
@@ -225,7 +225,7 @@ async function handleEvent(event) {
        SET severity = $1 
      WHERE userid = $2 
        AND severity IS NULL`,
-        [msg.text, userId]
+        [msg.text, userid]
       );
 
       // 3) 報告者への返信
@@ -245,7 +245,7 @@ async function handleEvent(event) {
       // 5) 管理者へのプッシュ通知
       if (admins.length > 0) {
         const pushText = `📢 新しい被害報告が届きました
-        ・ユーザーID: ${userId}
+        ・ユーザーID: ${userid}
         ・レベル: ${msg.text}`;
         try {
           await client.pushMessage(admins, { type: 'text', text: pushText });
