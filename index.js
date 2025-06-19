@@ -248,14 +248,19 @@ async function handleEvent(event) {
         ・ユーザーID: ${userid}
         ・レベル: ${msg.text}`;
         try {
-          await client.multicast(admins, { type:'text', text: pushText });
+            if (admins.length === 1) {
+              await client.pushMessage(admins[0], { type: 'text', text: pushText });
+            } 
+            else {
+              await client.multicast(admins, { type: 'text', text: pushText });
+            }
           console.log('✅ 管理者に通知を送信:', admins);
         } catch (err) {
           console.error('❌ 管理者への通知エラー:', err);
         }
       }
 
-      return;  
+      return;
     }
   }
 
