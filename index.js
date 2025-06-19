@@ -61,6 +61,18 @@ async function uploadImageFromLine(messageId, userid) {
   return result.Location;
 }
 
+// 管理者一覧を取得する関数
+async function getAdminUserIds() {
+  try {
+    const result = await pool.query('SELECT user_id FROM admins');
+    return result.rows.map(row => row.user_id);
+  } catch (err) {
+    console.error('❌ 管理者の取得に失敗:', err);
+    return [];
+  }
+}
+
+
 app.post(
   '/webhook',
   line.middleware(config),
@@ -201,16 +213,49 @@ async function handleEvent(event) {
       });
     }
 
-    if (msg.type === 'text' && userStates[userid] === 'waitingForSeverity') {
-      userStates[userid] = 'done';
+    if (msg.type === 'text' && userStates[userId] === 'waitingForSeverity') {
+      console.log('✅ entering severity branch for', userId);
+
+      // 1) 状態更新
+      userStates[userId] = 'done';
+
+      // 2) DB 更新
       await pool.query(
-        `UPDATE damagereport SET severity = $1 WHERE userid = $2 AND severity IS NULL`,
-        [msg.text, userid]
+        `UPDATE damagereport 
+       SET severity = $1 
+     WHERE userid = $2 
+       AND severity IS NULL`,
+        [msg.text, userId]
       );
-      return client.replyMessage(event.replyToken, [
-        { type: 'text', text: `ありがとうございます。「${msg.text}」として記録しました。ご協力ありがとうございました！` },
+
+      // 3) 報告者への返信
+      await client.replyMessage(event.replyToken, [
+        {
+          type: 'text',
+          text: `ありがとうございます。「${msg.text}」として記録しました。ご協力ありがとうございました！`
+        },
         getMenuButtons()
       ]);
+      console.log('✅ reply sent to reporter');
+
+      // 4) 管理者一覧取得
+      const admins = await getAdminUserIds();
+      console.log('ℹ️ admins to notify:', admins);
+
+      // 5) 管理者へのプッシュ通知
+      if (admins.length > 0) {
+        const pushText = `📢 新しい被害報告が届きました
+        ・ユーザーID: ${userId}
+        ・レベル: ${msg.text}`;
+        try {
+          await client.pushMessage(admins, { type: 'text', text: pushText });
+          console.log('✅ 管理者に通知を送信:', admins);
+        } catch (err) {
+          console.error('❌ 管理者への通知エラー:', err);
+        }
+      }
+
+      return;  
     }
   }
 
