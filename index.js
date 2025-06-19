@@ -26,7 +26,7 @@ const s3 = new AWS.S3({
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   region: process.env.AWS_REGION
 });
-
+//メニューボタンを表示する関数
 function getMenuButtons() {
   return {
     type: 'template',
@@ -43,6 +43,7 @@ function getMenuButtons() {
   };
 }
 
+//AWSのS3ストレージに取得した画像を格納する関数
 async function uploadImageFromLine(messageId, userid) {
   const imageStream = await client.getMessageContent(messageId);
   const chunks = [];
@@ -102,11 +103,11 @@ function chunkMessages(arr, size) {
 
 
 
+// デバッグ：リクエスト受信ログ
 app.post(
   '/webhook',
   line.middleware(config),
   async (req, res) => {
-    // デバッグ：リクエスト受信ログ
     console.log('📥 Received POST /webhook', JSON.stringify(req.body, null, 2));
 
     try {
@@ -122,26 +123,16 @@ app.post(
   }
 );
 
-
 async function handleEvent(event) {
   const userid = event.source.userId;
-
+  //友達追加時の処理
   if (event.type === 'follow') {
     return client.replyMessage(event.replyToken, getMenuButtons());
   }
 
   if (event.type === 'message') {
     const msg = event.message;
-
-    if (msg.type === 'text' && msg.text.trim() === '報告') {
-      userStates[userid] = 'waitingForLocation';
-      await pool.query(`INSERT INTO damagereport (userid) VALUES ($1)`, [userid]);
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '被害の位置情報を送ってください'
-      });
-    }
-
+    // 一覧機能
     if (msg.type === 'text' && msg.text.trim() === '一覧') {
       userStates[userid] = 'waitingForListCount';
       return client.replyMessage(event.replyToken, {
@@ -156,10 +147,10 @@ async function handleEvent(event) {
       let responsePrefix = '';
 
       if (input === 'all') {
-        responsePrefix = '📋 被害報告一覧（全件）\n\n';
+        responsePrefix = '📋 被害報告一覧（全件）\n';
       } else if (/^\d+$/.test(input)) {
         limitClause = `LIMIT ${parseInt(input, 10)}`;
-        responsePrefix = `📋 被害報告一覧（最新${input}件）\n\n`;
+        responsePrefix = `📋 被害報告一覧（最新${input}件）\n`;
       } else {
         return client.replyMessage(event.replyToken, {
           type: 'text',
@@ -180,25 +171,21 @@ async function handleEvent(event) {
             getMenuButtons()
           ]);
         }
-        // ① 配列化（buildReportMessages にレコードと index を渡す）
+        // 配列化（buildReportMessages にレコードと index を渡す）
         const allMsgs = result.rows.flatMap((r, idx) => buildReportMessages(r, idx));
-
-        // ② チャンク化（5 件ずつ）
-        const chunks = chunkMessages(allMsgs, 5);
-
-        // ヘッダーを先頭に追加
+        // ヘッダーを追加
         const headerMsg = { type: 'text', text: responsePrefix };
-        chunks[0].unshift(headerMsg);
+        allMsgs[0].unshift(headerMsg);
 
-        // ③ 送信
+        // チャンク化（5 件ずつ）
+        const chunks = chunkMessages(allMsgs, 5);
+        // 送信
         //最初のチャンクを返す
         await client.replyMessage(event.replyToken, chunks[0]);
-
         // 残りのチャンクは pushMessage で順次送信
         for (let i = 1; i < chunks.length; i++) {
           await client.pushMessage(userid, chunks[i]);
         }
-
         // メニューを表示
         await client.pushMessage(userid, getMenuButtons());
         return;
@@ -209,6 +196,16 @@ async function handleEvent(event) {
           getMenuButtons()
         ]);
       }
+    }
+
+    // 報告機能
+    if (msg.type === 'text' && msg.text.trim() === '報告') {
+      userStates[userid] = 'waitingForLocation';
+      await pool.query(`INSERT INTO damagereport (userid) VALUES ($1)`, [userid]);
+      return client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '被害の位置情報を送ってください'
+      });
     }
 
     if (msg.type === 'location' && userStates[userid] === 'waitingForLocation') {
