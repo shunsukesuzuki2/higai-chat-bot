@@ -2,30 +2,26 @@ const express = require('express');
 const line = require('@line/bot-sdk');
 const { Pool } = require('pg');
 const AWS = require('aws-sdk');
-
+const { v4: uuidv4 } = require('uuid');
+const MAX_IMAGES = 3
+const bufStore = new Map();
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET
 };
-
 const app = express();
 const client = new line.Client(config);
-
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
-
 const userStates = {};
-
-
-
 const s3 = new AWS.S3({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   region: process.env.AWS_REGION
 });
+
 //メニューボタンを表示する関数
 function getMenuButtons() {
   return {
@@ -43,22 +39,50 @@ function getMenuButtons() {
   };
 }
 
-//AWSのS3ストレージに取得した画像を格納する関数
-async function uploadImageFromLine(messageId, userid) {
-  const imageStream = await client.getMessageContent(messageId);
-  const chunks = [];
-  for await (const chunk of imageStream) {
-    chunks.push(chunk);
-  }
-  const buffer = Buffer.concat(chunks);
-  const key = `${userid}_${messageId}.jpg`;
-  const result = await s3.upload({
+function putObjectToS3(body, key) {
+  return s3.upload({
     Bucket: process.env.S3_BUCKET_NAME,
     Key: key,
-    Body: buffer,
+    Body: body,
     ContentType: 'image/jpeg'
   }).promise();
-  return result.Location;
+}
+
+async function uploadImagesBatch(event, reportId) {
+  // 画像メッセージは複数送ってくるのでアクセスタイプに注意
+  const messages = event.message ? [event] : event.messages; // マルチキャスト対策
+  const urlList = [];
+
+  for (const m of messages) {
+    if (m.message.type !== 'image') continue;
+    const stream = await client.getMessageContent(m.message.id);
+    const s3Key = `${reportId}/${Date.now()}_${m.message.id}.jpg`;
+    await putObjectToS3(stream, s3Key);            // 既存 util
+    urlList.push('https://higai-chat-images.s3.ap-northeast-1.amazonaws.com/${s3Key}');
+  }
+  return urlList;
+}
+
+
+
+async function insertImageRecords(client, reportId, urlList) {
+  const values = urlList.map((url, i) => [reportId, url, i + 1]);
+  const placeholders = values
+    .map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`)
+    .join(',');
+  const text = `
+    INSERT INTO damage_image (report_id, image_url, seq)
+    VALUES ${placeholders}
+  `;
+  const flatValues = values.flat();
+  await client.query(text, flatValues);
+}
+
+// ③ S3 へ一括アップロード → damage_image に登録
+async function flushImages(userid) {
+  const buf = bufStore.get(userid);
+  const urls = await uploadImagesBatch(buf.imgs, buf.reportId);
+  await insertImageRecords(pool, buf.reportId, urls);
 }
 
 // 管理者一覧を取得する関数
@@ -70,6 +94,24 @@ async function getAdminUserIds() {
     console.error('❌ 管理者の取得に失敗:', err);
     return [];
   }
+}
+
+//位置情報をデータベースに保存する関数
+async function storeLocation(userid, locMsg) {
+  const reportId = uuidv4();
+  bufStore.set(userid, { imgs: [], reportId });
+  await pool.query(
+    `INSERT INTO damagereport(id, userid, address, latitude, longitude)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [reportId, userid, locMsg.address, locMsg.latitude, locMsg.longitude]
+  );
+}
+// バッファに画像を保存する関数
+function bufferImage(userid, imgEvent) {
+  const buf = bufStore.get(userid);
+  if (!buf || buf.imgs.length >= MAX_IMAGES) return false;
+  buf.imgs.push(imgEvent);
+  return true;
 }
 
 //1報告の報告とその被害写真を1配列にまとめる関数
@@ -212,30 +254,31 @@ async function handleEvent(event) {
     }
 
     if (msg.type === 'location' && userStates[userid] === 'waitingForLocation') {
-      userStates[userid] = 'waitingForPhoto';
-      await pool.query(
-        `UPDATE damagereport SET address = $1, latitude = $2, longitude = $3 WHERE userid = $4 AND address IS NULL`,
-        [msg.address, msg.latitude, msg.longitude, userid]
-      );
+      await storeLocation(userid, msg);
+      userStates[userid] = 'waitingForPhotos';
       return client.replyMessage(event.replyToken, {
         type: 'text',
-        text: `位置情報を受け取りました（${msg.address}）。次に写真を共有してください。`
+        text: `位置情報を受け取りました（${msg.address}）。次に写真を共有し（最大3枚）、共有が終わったら完了と入力してください。`
       });
     }
 
-    if (msg.type === 'image' && userStates[userid] === 'waitingForPhoto') {
-      userStates[userid] = 'waitingForSeverity';
-
-      try {
-        const imageurl = await uploadImageFromLine(msg.id, userid);
-        await pool.query(
-          `UPDATE damagereport SET imageurl = $1 WHERE userid = $2 AND imageurl IS NULL`,
-          [imageurl, userid]
+    if (msg.type === 'image' && userStates[userid] === 'waitingForPhotos') {
+      if (!bufferImage(userid, event)) {
+        return client.replyMessage(
+          event.replyToken,
+          { type: 'text', text: '⚠️ 写真は最大3枚です。「完了」と入力してください' }
         );
-      } catch (err) {
-        console.error('❌ S3アップロード処理中のエラー:', err);
       }
+      const count = bufStore.get(userid).imgs.length;
+      client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '✅ 写真を受信（${count}/${MAX_IMAGES}）。追加か「完了」で次へ'
+      });
+    }
 
+    if (msg.type === 'text' && msg.text.trim() === '完了' && userStates[userid] === 'waitingForPhotos') {
+      await flushImages(userid);                       // S3 & DB 反映
+      userStates[userid] = 'waitingForSeverity';
       return client.replyMessage(event.replyToken, {
         type: 'text',
         text: '被害状況のレベルを選択してください',
