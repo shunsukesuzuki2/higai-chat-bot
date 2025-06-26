@@ -55,8 +55,11 @@ async function uploadImagesBatch(events, reportId) {
     if (m.message.type !== 'image') continue;
     const stream = await client.getMessageContent(m.message.id);
     const s3Key = `${reportId}/${Date.now()}_${m.message.id}.jpg`;
-    await putObjectToS3(stream, s3Key);            // 既存 util
-    urlList.push(`https://higai-chat-images.s3.ap-northeast-1.amazonaws.com/${s3Key}`);
+    await putObjectToS3(stream, s3Key);
+    const bucket = process.env.S3_BUCKET_NAME; 
+    const region = process.env.AWS_REGION || 'ap-northeast-1';
+    urlList.push(`https://${bucket}.s3.${region}.amazonaws.com/${s3Key}`);
+
   }
   return urlList;
 }
@@ -133,7 +136,7 @@ function buildReportMessages(r, idx) {
     previewImageUrl: url
   }));
 
-  return [textMsg, ...imageMsgs];  
+  return [textMsg, ...imageMsgs];
 
 }
 
