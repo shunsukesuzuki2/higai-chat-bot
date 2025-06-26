@@ -47,9 +47,8 @@ function putObjectToS3(body, key) {
   }).promise();
 }
 
-async function uploadImagesBatch(event, reportId) {
-  // 画像メッセージは複数送ってくるのでアクセスタイプに注意
-  const messages = event.message ? [event] : event.messages; // マルチキャスト対策
+async function uploadImagesBatch(events, reportId) {
+  const messages = events;
   const urlList = [];
 
   for (const m of messages) {
