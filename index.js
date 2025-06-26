@@ -57,7 +57,7 @@ async function uploadImagesBatch(event, reportId) {
     const stream = await client.getMessageContent(m.message.id);
     const s3Key = `${reportId}/${Date.now()}_${m.message.id}.jpg`;
     await putObjectToS3(stream, s3Key);            // 既存 util
-    urlList.push('https://higai-chat-images.s3.ap-northeast-1.amazonaws.com/${s3Key}');
+    urlList.push(`https://higai-chat-images.s3.ap-northeast-1.amazonaws.com/${s3Key}`);
   }
   return urlList;
 }
@@ -97,7 +97,8 @@ async function getAdminUserIds() {
 
 //位置情報をデータベースに保存する関数
 async function storeLocation(userid, locMsg) {
-
+  const { reportId } = bufStore.get(userid) ?? {};
+  if (!reportId) throw new Error('storeLocation: reportId not found');
   await pool.query(
     `UPDATE damagereport
        SET address = $1,
@@ -250,9 +251,8 @@ async function handleEvent(event) {
         `INSERT INTO damagereport (userid) VALUES ($1) RETURNING id`,
         [userid]
       );
-      const reportId = result.rows[0].id;      
-
-      bufStore.set(userid, { imgs: [], reportId }); 
+      const reportId = result.rows[0].id;
+      bufStore.set(userid, { imgs: [], reportId });
       userStates[userid] = 'waitingForLocation';
       return client.replyMessage(event.replyToken, {
         type: 'text',
@@ -279,7 +279,7 @@ async function handleEvent(event) {
       const count = bufStore.get(userid).imgs.length;
       client.replyMessage(event.replyToken, {
         type: 'text',
-        text: '✅ 写真を受信（${count}/${MAX_IMAGES}）。追加か「完了」で次へ'
+        text: `✅ 写真を受信（${count}/${MAX_IMAGES}）。追加か「完了」で次へ`
       });
     }
 
