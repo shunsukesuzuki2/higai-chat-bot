@@ -2,7 +2,6 @@ const express = require('express');
 const line = require('@line/bot-sdk');
 const { Pool } = require('pg');
 const AWS = require('aws-sdk');
-const { v4: uuidv4 } = require('uuid');
 const MAX_IMAGES = 3
 const bufStore = new Map();
 const config = {
@@ -98,12 +97,14 @@ async function getAdminUserIds() {
 
 //位置情報をデータベースに保存する関数
 async function storeLocation(userid, locMsg) {
-  const reportId = uuidv4();
-  bufStore.set(userid, { imgs: [], reportId });
+
   await pool.query(
-    `INSERT INTO damagereport(id, userid, address, latitude, longitude)
-     VALUES ($1,$2,$3,$4,$5)`,
-    [reportId, userid, locMsg.address, locMsg.latitude, locMsg.longitude]
+    `UPDATE damagereport
+       SET address = $1,
+           latitude = $2,
+            longitude = $3
+     WHERE id = $4`,
+    [locMsg.address, locMsg.latitude, locMsg.longitude, reportId]
   );
 }
 // バッファに画像を保存する関数
@@ -245,11 +246,17 @@ async function handleEvent(event) {
 
     // 報告機能
     if (msg.type === 'text' && msg.text.trim() === '報告') {
+      const result = await pool.query(
+        `INSERT INTO damagereport (userid) VALUES ($1) RETURNING id`,
+        [userid]
+      );
+      const reportId = result.rows[0].id;      
+
+      bufStore.set(userid, { imgs: [], reportId }); 
       userStates[userid] = 'waitingForLocation';
-      await pool.query(`INSERT INTO damagereport (userid) VALUES ($1)`, [userid]);
       return client.replyMessage(event.replyToken, {
         type: 'text',
-        text: '被害の位置情報を送ってください'
+        text: ' 被害場所の位置情報を送ってください'
       });
     }
 
