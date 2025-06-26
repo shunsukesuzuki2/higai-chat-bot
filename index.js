@@ -61,8 +61,6 @@ async function uploadImagesBatch(events, reportId) {
   return urlList;
 }
 
-
-
 async function insertImageRecords(client, reportId, urlList) {
   const values = urlList.map((url, i) => [reportId, url, i + 1]);
   const placeholders = values
@@ -129,13 +127,14 @@ function buildReportMessages(r, idx) {
       `被害: ${r.severity}`
   };
 
-  const imageMsg = {
+  const imageMsgs = (r.images || []).map(url => ({
     type: 'image',
-    originalContentUrl: r.imageurl,
-    previewImageUrl: r.imageurl
-  };
+    originalContentUrl: url,
+    previewImageUrl: url
+  }));
 
-  return [textMsg, imageMsg];
+  return [textMsg, ...imageMsgs];  
+
 }
 
 // size件ごとにレポートメッセージをまとめる関数
@@ -208,16 +207,25 @@ async function handleEvent(event) {
 
       try {
         const result = await pool.query(
-          `SELECT address, latitude, longitude, severity, userid, imageurl FROM damagereport ORDER BY id DESC ${limitClause}`
+          `SELECT d.id,
+          d.address,
+          d.latitude,
+          d.longitude,
+          d.severity,
+          array_remove(array_agg(i.image_url ORDER BY i.seq), NULL) AS images
+           FROM damagereport AS d
+          LEFT JOIN damage_image AS i ON i.report_id = d.id
+          GROUP BY d.id
+          ORDER BY d.id DESC
+          ${limitClause}`                     // ← existing 「LIMIT n」部
         );
-
         if (result.rows.length === 0) {
           return client.replyMessage(event.replyToken, [
             { type: 'text', text: '被害報告はまだ登録されていません。' },
             getMenuButtons()
           ]);
         }
-        // 配列化（buildReportMessages にDBのと index を渡す）
+        // 配列化（buildReportMessages にDBと index を渡す）
         const allMsgs = result.rows.flatMap((r, idx) => buildReportMessages(r, idx));
         // ヘッダーを追加
         const headerMsg = { type: 'text', text: responsePrefix };
