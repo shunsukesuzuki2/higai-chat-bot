@@ -56,7 +56,7 @@ async function uploadImagesBatch(events, reportId) {
     const stream = await client.getMessageContent(m.message.id);
     const s3Key = `${reportId}/${Date.now()}_${m.message.id}.jpg`;
     await putObjectToS3(stream, s3Key);
-    const bucket = process.env.S3_BUCKET_NAME; 
+    const bucket = process.env.S3_BUCKET_NAME;
     const region = process.env.AWS_REGION || 'ap-northeast-1';
     urlList.push(`https://${bucket}.s3.${region}.amazonaws.com/${s3Key}`);
 
@@ -85,10 +85,12 @@ async function flushImages(userid) {
 }
 
 // 管理者一覧を取得する関数
-async function getAdminUserIds() {
+async function getnoticeUserIds() {
   try {
-    const result = await pool.query('SELECT user_id FROM admins');
-    return result.rows.map(row => row.user_id);
+    const { rows } = await pool.query(
+      'SELECT user_id FROM admins WHERE notice = true'
+    );
+    return rows.map(r => r.user_id);
   } catch (err) {
     console.error('❌ 管理者の取得に失敗:', err);
     return [];
@@ -127,7 +129,10 @@ function buildReportMessages(r, idx) {
       `住所: ${r.address ?? '不明'}\n` +
       `google map: ${mapUrl ?? '不明'}\n` +
       `緯度: ${r.latitude}, 経度: ${r.longitude}\n` +
-      `被害: ${r.severity}`
+      `被害: ${r.severity}` +
+      `報告者: ${r.name ?? '未登録'}\n` +
+      `会社名: ${r.company ?? '―'}\n` +
+      `電話番号: ${r.phone_number ?? '―'}`
   };
 
   const imageMsgs = (r.images || []).map(url => ({
@@ -209,19 +214,24 @@ async function handleEvent(event) {
       userStates[userid] = 'done';
 
       try {
-        const result = await pool.query(
-          `SELECT d.id,
+        const result = await pool.query(`
+        SELECT
+          d.id,
           d.address,
           d.latitude,
           d.longitude,
           d.severity,
+          a.name,
+          a.company,
+          a.phone_number,
           array_remove(array_agg(i.image_url ORDER BY i.seq), NULL) AS images
-           FROM damagereport AS d
-          LEFT JOIN damage_image AS i ON i.report_id = d.id
-          GROUP BY d.id
-          ORDER BY d.id DESC
-          ${limitClause}`                     // ← existing 「LIMIT n」部
-        );
+        FROM damagereport  AS d
+        LEFT JOIN damage_image AS i ON i.report_id = d.id
+        LEFT JOIN admins       AS a ON a.user_id   = d.userid
+        GROUP BY d.id, a.name, a.company, a.phone_number
+        ORDER BY d.id DESC
+        ${limitClause}
+`);
         if (result.rows.length === 0) {
           return client.replyMessage(event.replyToken, [
             { type: 'text', text: '被害報告はまだ登録されていません。' },
@@ -335,22 +345,22 @@ async function handleEvent(event) {
       console.log('✅ reply sent to reporter');
 
       // 4) 管理者一覧取得
-      const admins = await getAdminUserIds();
-      console.log('ℹ️ admins to notify:', admins);
+      const notices = await getnoticeUserIds();
+      console.log('ℹ️ admins to notify:', notices);
 
       // 5) 管理者へのプッシュ通知
-      if (admins.length > 0) {
+      if (notices.length > 0) {
         const pushText = ` 新しい被害報告が届きました
         ・ユーザーID: ${userid}
         ・レベル: ${msg.text}`;
         try {
-          if (admins.length === 1) {
-            await client.pushMessage(admins[0], { type: 'text', text: pushText });
+          if (notices.length === 1) {
+            await client.pushMessage(notices[0], { type: 'text', text: pushText });
           }
           else {
-            await client.multicast(admins, { type: 'text', text: pushText });
+            await client.multicast(notices, { type: 'text', text: pushText });
           }
-          console.log('✅ 管理者に通知を送信:', admins);
+          console.log('✅ 管理者に通知を送信:', notices);
         } catch (err) {
           console.error('❌ 管理者への通知エラー:', err);
         }
