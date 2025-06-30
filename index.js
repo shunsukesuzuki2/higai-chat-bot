@@ -129,7 +129,7 @@ function buildReportMessages(r, idx) {
       `住所: ${r.address ?? '不明'}\n` +
       `google map: ${mapUrl ?? '不明'}\n` +
       `緯度: ${r.latitude}, 経度: ${r.longitude}\n` +
-      `被害: ${r.severity}` +
+      `被害: ${r.severity}\n` +
       `報告者: ${r.name ?? '未登録'}\n` +
       `会社名: ${r.company ?? '―'}\n` +
       `電話番号: ${r.phone_number ?? '―'}`
